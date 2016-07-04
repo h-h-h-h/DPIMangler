@@ -1,18 +1,26 @@
 #include <Windows.h>
+#include <ShellScalingAPI.h>
 #include "MinHook.h"
 
 bool initialized = false;
 
-typedef int (WINAPI *SETPROCESSDPIAWARE)(VOID);
-typedef int (WINAPI *SETPROCESSDPIAWARENESS)(VOID); // TODO: For W8.1 users, hook SetProcessDpiAwareness and nuke it too
+typedef BOOL (WINAPI *SETPROCESSDPIAWARE)(VOID);
+typedef HRESULT (WINAPI *SETPROCESSDPIAWARENESS)(PROCESS_DPI_AWARENESS);
 
-// Pointer for calling original SETPROCESSDPIAWARE.
+// Pointer for calling the original DPI awareness functions.
 SETPROCESSDPIAWARE fpSetProcessDPIAware = NULL;
+SETPROCESSDPIAWARENESS fpSetProcessDpiAwareness = NULL;
 
-// New function which overrides SetProcessDPIAware.
-int WINAPI NukeSetProcessDPIAware()
+// Replacement for SetProcessDPIAware.
+BOOL WINAPI NukeSetProcessDPIAware()
 {
-    return 0;
+    return FALSE;
+}
+
+// Replacement for SetProcessDpiAwareness.
+HRESULT WINAPI NukeSetProcessDpiAwareness(PROCESS_DPI_AWARENESS value)
+{
+    return E_ACCESSDENIED;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
@@ -20,8 +28,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
-        if (initialized == true)
+        if (initialized) {
             break;
+        }
 
         initialized = true;
 
@@ -34,16 +43,19 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             return 1;
         }
 
-        // Create a hook for SetProcessDPIAware, in disabled state.
+        // Create a hook for the DPI awareness functions, in disabled state.
         if (MH_CreateHook(&SetProcessDPIAware, &NukeSetProcessDPIAware,
-            reinterpret_cast<void**>(&fpSetProcessDPIAware)) != MH_OK)
+            reinterpret_cast<void**>(&fpSetProcessDPIAware)) != MH_OK ||
+            MH_CreateHook(&SetProcessDpiAwareness, &NukeSetProcessDpiAwareness,
+            reinterpret_cast<void**>(&fpSetProcessDpiAwareness)) != MH_OK)
         {
             MessageBoxW(NULL, L"Error creating hook", L"DPIMangler", MB_OK);
             return 1;
         }
 
-        // Enable the hook for SetProcessDPIAware.
-        if (MH_EnableHook(&SetProcessDPIAware) != MH_OK)
+        // Enable the hook for the DPI awareness functions.
+        if (MH_EnableHook(&SetProcessDPIAware) != MH_OK ||
+            MH_EnableHook(&SetProcessDpiAwareness) != MH_OK)
         {
             MessageBoxW(NULL, L"Error enabling hook", L"DPIMangler", MB_OK);
             return 1;
@@ -53,9 +65,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         break;
     case DLL_PROCESS_DETACH:
-
-        // Disable the hook for SetProcessDPIAware.
-        if (MH_DisableHook(&SetProcessDPIAware) != MH_OK)
+        // Disable the hook for the DPI awareness functions.
+        if (MH_DisableHook(&SetProcessDPIAware) != MH_OK ||
+            MH_DisableHook(&SetProcessDpiAwareness) != MH_OK)
         {
             MessageBoxW(NULL, L"Error disabling hook", L"DPIMangler", MB_OK);
             return 1;
